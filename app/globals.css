@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 99%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 210 90% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 190 95% 45%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 46%;
+    --accent: 190 90% 92%;
+    --accent-foreground: 210 90% 30%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 210 90% 50%;
+    --chart-1: 210 90% 55%;
+    --chart-2: 190 95% 45%;
+    --chart-3: 175 70% 45%;
+    --chart-4: 230 70% 60%;
+    --chart-5: 260 60% 65%;
+    --radius: 1rem;
+  }
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 95% 60%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 190 90% 50%;
+    --secondary-foreground: 222 47% 6%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 210 90% 20%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 210 95% 60%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-image:
+      radial-gradient(at 0% 0%, hsla(210, 100%, 90%, 0.5) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(190, 100%, 88%, 0.4) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, hsla(220, 100%, 92%, 0.3) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(at 0% 0%, hsla(210, 80%, 15%, 0.6) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(190, 80%, 12%, 0.5) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, hsla(220, 80%, 10%, 0.4) 0px, transparent 50%);
+  }
+  h1, h2, h3, h4 { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; letter-spacing: -0.02em; }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/60 dark:bg-white/5 backdrop-blur-xl border border-white/40 dark:border-white/10 shadow-[0_8px_32px_rgba(31,38,135,0.08)];
+  }
+  .glass-strong {
+    @apply bg-white/80 dark:bg-white/10 backdrop-blur-2xl border border-white/50 dark:border-white/10 shadow-[0_20px_60px_-15px_rgba(31,38,135,0.15)];
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-sky-600 via-cyan-500 to-blue-600 bg-clip-text text-transparent;
+  }
+  .btn-primary-grad {
+    @apply bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white shadow-lg shadow-sky-500/30 transition-all;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-12px); }
+}
+.animate-float { animation: float 6s ease-in-out infinite; }
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+.animate-pulse-ring { animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+.scan-frame {
+  position: relative;
+  overflow: hidden;
+}
+.scan-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0) 100%);
+  transform: translateX(-110%);
+  animation: scan 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes scan {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(110%); }
+}
