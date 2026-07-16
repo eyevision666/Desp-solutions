@@ -921,15 +921,47 @@ function ResultPage({ result, setView }) {
         y += 160
       }
 
-      // ===== DOCTOR NOTES =====
-      ensureSpace(140)
-      sectionTitle('Doctor’s Notes & Consultation')
+      const drawBarChart = (bars, x, yPos, width, height) => {
+        const chartHeight = height || 90
+        const maxValue = Math.max(...bars.map((bar) => bar.value), 100)
+        const gap = 16
+        const barWidth = (width - gap * (bars.length + 1)) / bars.length
+        setColor(doc.setDrawColor.bind(doc), P.line); doc.setLineWidth(0.5)
+        doc.rect(x, yPos, width, chartHeight)
+        bars.forEach((bar, index) => {
+          const barHeight = Math.max(12, (bar.value / maxValue) * (chartHeight - 28))
+          const barX = x + gap + index * (barWidth + gap)
+          const barY = yPos + chartHeight - 14 - barHeight
+          setColor(doc.setFillColor.bind(doc), bar.color)
+          doc.roundedRect(barX, barY, barWidth, barHeight, 4, 4, 'F')
+          setColor(doc.setDrawColor.bind(doc), P.line)
+          doc.roundedRect(barX, barY, barWidth, barHeight, 4, 4, 'S')
+          setColor(doc.setTextColor.bind(doc), P.ink); doc.setFont('helvetica','bold'); doc.setFontSize(8)
+          doc.text(String(bar.value), barX + barWidth / 2, barY - 7, { align: 'center' })
+          setColor(doc.setTextColor.bind(doc), P.muted); doc.setFont('helvetica','normal'); doc.setFontSize(7.5)
+          doc.text(bar.label, barX + barWidth / 2, yPos + chartHeight + 10, { align: 'center' })
+        })
+      }
+
+      // ===== EYE CARE CONSULTANT NOTES =====
+      ensureSpace(220)
+      sectionTitle('Eye Care Consultant Notes')
       setColor(doc.setDrawColor.bind(doc), P.line)
       for (let i = 0; i < 4; i++) { doc.line(MARGIN, y + i * 18 + 10, W - MARGIN, y + i * 18 + 10) }
       y += 80
+
+      const aiChartData = [
+        { label: 'Score', value: Math.min(r.score, 100), color: P.primary },
+        { label: 'Severity', value: Math.min(r.level * 25, 100), color: [8, 145, 178] },
+        { label: 'Symptoms', value: Math.min(Math.max((result.symptoms?.length || 0) * 15, 10), 100), color: [16, 185, 129] },
+        { label: 'Screen Time', value: Math.min(Math.max(totalHours * 8, 10), 100), color: [249, 115, 22] },
+      ]
+      drawBarChart(aiChartData, MARGIN, y + 10, W - MARGIN * 2, 95)
+      y += 135
+
       setColor(doc.setTextColor.bind(doc), P.muted); doc.setFont('helvetica','normal'); doc.setFontSize(8.5)
-      doc.text('Attending Physician Signature: __________________________', MARGIN, y + 5)
-      doc.text('Date: ______________________', W - MARGIN - 160, y + 5)
+      doc.text('Eye Care Consultant Signature: __________________________', MARGIN, y + 5)
+      doc.text('Date: ______________________', W - MARGIN - 180, y + 5)
       y += 25
 
       // ===== QR + FOOTER FINAL PAGE =====
