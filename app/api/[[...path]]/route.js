@@ -6,10 +6,11 @@ import { appendAssessment, syncAssessments } from '@/lib/sheets'
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Aravind@4906'
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'EYE VISION'
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'aravind4906'
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'eyevision'
 const JWT_SECRET_ENCODED = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-only-not-secure')
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://vmlnrnsxfzneojwpbpjo.supabase.co'
+const isProd = process.env.NODE_ENV === 'production'
+const SUPABASE_URL = process.env.SUPABASE_URL || ''
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLIC_KEY
 const SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY || ''
@@ -72,6 +73,16 @@ function json(data, status = 200) {
   })
 }
 
+function getCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+  }
+}
+
 export async function OPTIONS() { return json({}) }
 
 async function route(request, method) {
@@ -99,13 +110,7 @@ async function route(request, method) {
         .setExpirationTime('7d')
         .sign(JWT_SECRET_ENCODED)
       const cookieStore = await cookies()
-      cookieStore.set('admin_session', token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7,
-      })
+      cookieStore.set('admin_session', token, getCookieOptions())
       return json({ success: true, username })
     }
 
@@ -153,11 +158,14 @@ async function route(request, method) {
         const { error } = await db.from(SUPABASE_TABLE).insert([dbDoc])
         if (error) {
           console.error('[api] Supabase insert error', error)
-          fallbackAssessments.push(doc)
+          if (!isProd) fallbackAssessments.push(doc)
+          return json({ error: error.message || 'Failed to save to Supabase' }, 500)
         }
-      } else {
+      } else if (!isProd) {
         console.log('[api] Supabase not configured, using fallback')
         fallbackAssessments.push(doc)
+      } else {
+        return json({ error: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before deployment.' }, 500)
       }
 
       // Sync to Google Sheets (non-blocking best-effort)
@@ -187,9 +195,12 @@ async function route(request, method) {
     if (segments[0] === 'assessments' && segments.length === 2 && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
       if (!db) {
-        const doc = fallbackAssessments.find((item) => item.id === segments[1])
-        if (!doc) return json({ error: 'not found' }, 404)
-        return json(doc)
+        if (!isProd) {
+          const doc = fallbackAssessments.find((item) => item.id === segments[1])
+          if (!doc) return json({ error: 'not found' }, 404)
+          return json(doc)
+        }
+        return json({ error: 'Supabase is not configured' }, 500)
       }
       const { data, error } = await db.from(SUPABASE_TABLE).select('*').eq('id', segments[1]).single()
       if (error) {
@@ -202,7 +213,10 @@ async function route(request, method) {
     if (segments[0] === 'assessments' && segments.length === 1 && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
       if (!db) {
-        return json(fallbackAssessments.map(({ result, ...rest }) => ({ ...rest, result, eyeImages: undefined })))
+        if (!isProd) {
+          return json(fallbackAssessments.map(({ result, ...rest }) => ({ ...rest, result, eyeImages: undefined })))
+        }
+        return json({ error: 'Supabase is not configured' }, 500)
       }
       const { data, error } = await db.from(SUPABASE_TABLE)
         .select('id,createdat,patient,medicalhistory,symptoms,ocularhistory,screentime,devices,devicehours,usagetypes,result')
@@ -216,16 +230,19 @@ async function route(request, method) {
     if (segments[0] === 'stats' && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
       if (!db) {
-        const total = fallbackAssessments.length
-        const today = new Date(); today.setHours(0,0,0,0)
-        const todayCount = fallbackAssessments.filter((a) => new Date(a.createdAt) >= today).length
-        const avgScore = total ? Math.round(fallbackAssessments.reduce((sum, a) => sum + a.result.score, 0) / total) : 0
-        const levelMap = fallbackAssessments.reduce((acc, a) => {
-          acc[a.result.level] = (acc[a.result.level] || 0) + 1
-          return acc
-        }, {})
-        const severity = Object.entries(levelMap).map(([level, count]) => ({ _id: Number(level), count })).sort((a, b) => a._id - b._id)
-        return json({ total, todayCount, avgScore, severity })
+        if (!isProd) {
+          const total = fallbackAssessments.length
+          const today = new Date(); today.setHours(0,0,0,0)
+          const todayCount = fallbackAssessments.filter((a) => new Date(a.createdAt) >= today).length
+          const avgScore = total ? Math.round(fallbackAssessments.reduce((sum, a) => sum + a.result.score, 0) / total) : 0
+          const levelMap = fallbackAssessments.reduce((acc, a) => {
+            acc[a.result.level] = (acc[a.result.level] || 0) + 1
+            return acc
+          }, {})
+          const severity = Object.entries(levelMap).map(([level, count]) => ({ _id: Number(level), count })).sort((a, b) => a._id - b._id)
+          return json({ total, todayCount, avgScore, severity })
+        }
+        return json({ error: 'Supabase is not configured' }, 500)
       }
       const { count: totalCount, error: totalError } = await db.from(SUPABASE_TABLE).select('id', { count: 'exact', head: true })
       if (totalError) throw new Error(totalError.message)

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Component } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -79,6 +79,51 @@ const symptomNormalize = (s) => ({
   'Eye Redness': 'Redness',
   'Eye Irritation': 'Irritation',
 }[s] || s)
+
+function getErrorMessage(error) {
+  if (!error) return 'Something went wrong'
+  if (typeof error === 'string') return error.trim() || 'Something went wrong'
+  if (error instanceof Error) return error.message || 'Something went wrong'
+  if (typeof error === 'object') {
+    if (typeof error.message === 'string' && error.message.trim()) return error.message
+    if (typeof error.error === 'string' && error.error.trim()) return error.error
+    if (typeof error.detail === 'string' && error.detail.trim()) return error.detail
+    if (typeof Event !== 'undefined' && error instanceof Event) return 'An unexpected browser event occurred'
+    if (typeof error === 'object' && error?.constructor?.name === 'Event') return 'An unexpected browser event occurred'
+  }
+  return 'Something went wrong'
+}
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('App runtime error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center px-4">
+          <Card className="glass-strong rounded-3xl p-8 max-w-md text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
+            <p className="text-sm text-muted-foreground mb-4">The app hit an unexpected runtime error. Please refresh the page and try again.</p>
+            <Button onClick={() => window.location.reload()} className="btn-primary-grad">Refresh Page</Button>
+          </Card>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 function Nav({ setView }) {
   const { theme, setTheme } = useTheme()
@@ -402,15 +447,19 @@ function Survey({ setView, setResult }) {
         const message = responseBody?.error || responseBody?.message || 'Failed to submit'
         throw new Error(message)
       }
-      setResult(responseBody)
-      // show a brief processing animation page before showing results
-      setView('processing')
+      const nextResult = responseBody || {}
+      setResult(nextResult)
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('assessment:completed', { detail: { id: responseBody.id } }))
+        try {
+          window.dispatchEvent(new CustomEvent('assessment:completed', { detail: { id: nextResult.id } }))
+        } catch (eventError) {
+          console.warn('Assessment event dispatch failed:', eventError)
+        }
       }
       toast.success('Assessment complete!')
+      setView('processing')
     } catch (e) {
-      toast.error(e.message || 'Something went wrong')
+      toast.error(getErrorMessage(e))
       console.error('Submit failure:', e)
     } finally { setSubmitting(false) }
   }
@@ -690,6 +739,23 @@ function ResultPage({ result, setView }) {
       const MARGIN = 40
       let y = 0
 
+      const fetchDataUrl = async (url) => {
+        try {
+          const res = await fetch(url)
+          if (!res.ok) return null
+          const blob = await res.blob()
+          return await new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result)
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+        } catch {
+          return null
+        }
+      }
+      const logoDataUrl = await fetchDataUrl('/eye-vision-logo.png')
+
       const P = {
         primary: [14, 116, 191],       // deep clinical blue
         primaryLight: [219, 234, 254],
@@ -706,7 +772,7 @@ function ResultPage({ result, setView }) {
 
       const setColor = (fn, c) => fn(c[0], c[1], c[2])
       const line = (yy) => { setColor(doc.setDrawColor.bind(doc), P.line); doc.setLineWidth(0.5); doc.line(MARGIN, yy, W - MARGIN, yy) }
-      const ensureSpace = (need) => { if (y + need > H - 60) { addFooter(); doc.addPage(); y = 40; drawHeaderMini() } }
+      const ensureSpace = (need) => { if (y + need > H - 60) { doc.addPage(); y = 40; drawHeaderMini() } }
 
       const drawHeaderMini = () => {
         setColor(doc.setFillColor.bind(doc), P.primary)
@@ -748,18 +814,25 @@ function ResultPage({ result, setView }) {
       // ===== LETTERHEAD =====
       setColor(doc.setFillColor.bind(doc), P.primary)
       doc.rect(0, 0, W, 140, 'F')
+      if (logoDataUrl) {
+        try {
+          doc.addImage(logoDataUrl, 'PNG', MARGIN, 18, 90, 90)
+        } catch (e) {
+          console.warn('Failed to add logo image to PDF', e)
+        }
+      }
       setColor(doc.setTextColor.bind(doc), [255, 255, 255])
       doc.setFont('helvetica', 'bold'); doc.setFontSize(28)
-      doc.text('DESP SOLUTIONS', W / 2, 40, { align: 'center' })
+      doc.text('DESP SOLUTIONS', W / 2 + 20, 40, { align: 'center' })
       doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
-      doc.text('Professional Digital Eye Strain Screening', W / 2, 58, { align: 'center' })
+      doc.text('Professional Digital Eye Strain Screening', W / 2 + 20, 58, { align: 'center' })
       doc.setFont('helvetica', 'italic'); doc.setFontSize(9)
-      doc.text('Clinical Assessment Report', W / 2, 74, { align: 'center' })
+      doc.text('Clinical Assessment Report', W / 2 + 20, 74, { align: 'center' })
       setColor(doc.setDrawColor.bind(doc), [255, 255, 255])
       doc.setLineWidth(2)
-      doc.ellipse(W / 2, 105, 28, 14, 'S')
-      doc.circle(W / 2, 105, 5, 'F')
-      doc.line(W / 2 - 12, 105, W / 2 + 12, 105)
+      doc.ellipse(W / 2 + 20, 105, 28, 14, 'S')
+      doc.circle(W / 2 + 20, 105, 5, 'F')
+      doc.line(W / 2 + 8, 105, W / 2 + 32, 105)
 
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
       const dt = new Date(result.createdAt)
@@ -975,21 +1048,7 @@ function ResultPage({ result, setView }) {
         // disclaimer intentionally omitted per user request
       } catch (e) {}
 
-      // finalize all pages footer and ensure PDF has exactly 3 pages
-      const desiredPages = 3
-      let pageCount = doc.internal.getNumberOfPages()
-      if (pageCount < desiredPages) {
-        for (let i = pageCount + 1; i <= desiredPages; i++) {
-          doc.addPage()
-        }
-        pageCount = desiredPages
-      }
-      if (pageCount > desiredPages && typeof doc.deletePage === 'function') {
-        for (let i = pageCount; i > desiredPages; i--) {
-          doc.deletePage(i)
-        }
-        pageCount = desiredPages
-      }
+      const pageCount = doc.internal.getNumberOfPages()
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i)
         addFooter(i)
@@ -999,7 +1058,7 @@ function ResultPage({ result, setView }) {
       toast.success('Professional PDF report generated!')
     } catch (e) {
       console.error(e)
-      toast.error('PDF generation failed: ' + e.message)
+      toast.error(`PDF generation failed: ${getErrorMessage(e)}`)
     } finally { setGenerating(false) }
   }
 
@@ -1291,7 +1350,7 @@ function Admin({ setView }) {
         : `✔️ Google Sheets already up to date (${data.skipped} rows in sync)`
       toast.success(msg)
     } catch (e) {
-      toast.error('Sync error: ' + e.message)
+      toast.error(`Sync error: ${getErrorMessage(e)}`)
     } finally { setSyncing(false) }
   }
 
@@ -1335,7 +1394,7 @@ function Admin({ setView }) {
                   toast.error(data.error || 'Invalid credentials')
                 }
               } catch (e) {
-                setLoginError('Login failed. Please try again.')
+                setLoginError(getErrorMessage(e) || 'Login failed. Please try again.')
               }
             }} className="w-full btn-primary-grad">Sign in</Button>
           </div>
@@ -1611,24 +1670,28 @@ function App() {
   const [result, setResult] = useState(null)
 
   return (
-    <div className="min-h-screen">
-      <Nav setView={setView} />
-      <AnimatePresence mode="wait">
-        <motion.div key={view} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-          {view === 'home' && <Home setView={setView} />}
-          {view === 'survey' && <Survey setView={setView} setResult={setResult} />}
-          {view === 'processing' && <Processing result={result} setView={setView} />}
-          {view === 'result' && <ResultPage result={result} setView={setView} />}
-          {view === 'admin' && <Admin setView={setView} />}
-        </motion.div>
-      </AnimatePresence>
-      <footer className="border-t border-white/30 dark:border-white/10 py-6 mt-10 text-center text-xs text-muted-foreground">
-        <div className="container mx-auto px-4">
-          © DESP Solutions · AI-Powered Digital Eye Strain Screening · For educational purposes only, not a substitute for professional medical advice.
-        </div>
-      </footer>
-    </div>
+    <AppErrorBoundary>
+      <div className="min-h-screen">
+        <Nav setView={setView} />
+        <AnimatePresence mode="wait">
+          <motion.div key={view} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
+            {view === 'home' && <Home setView={setView} />}
+            {view === 'survey' && <Survey setView={setView} setResult={setResult} />}
+            {view === 'processing' && <Processing result={result} setView={setView} />}
+            {view === 'result' && <ResultPage result={result} setView={setView} />}
+            {view === 'admin' && <Admin setView={setView} />}
+          </motion.div>
+        </AnimatePresence>
+        <footer className="border-t border-white/30 dark:border-white/10 py-6 mt-10 text-center text-xs text-muted-foreground">
+          <div className="container mx-auto px-4">
+            © DESP Solutions · AI-Powered Digital Eye Strain Screening · For educational purposes only, not a substitute for professional medical advice.
+          </div>
+        </footer>
+      </div>
+    </AppErrorBoundary>
   )
 }
 
-export default App
+export default function Page() {
+  return <App />
+}
