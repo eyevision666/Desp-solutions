@@ -729,9 +729,8 @@ function ResultPage({ result, setView }) {
   const generatePDF = async () => {
     setGenerating(true)
     try {
-      const [{ default: jsPDF }, QRCodeLib] = await Promise.all([
+      const [{ default: jsPDF }] = await Promise.all([
         import('jspdf'),
-        import('qrcode'),
       ])
       const doc = new jsPDF({ unit: 'pt', format: 'a4' })
       const W = doc.internal.pageSize.getWidth()
@@ -1036,17 +1035,6 @@ function ResultPage({ result, setView }) {
       doc.text('Eye Care Consultant Signature: __________________________', MARGIN, y + 5)
       doc.text('Date: ______________________', W - MARGIN - 180, y + 5)
       y += 25
-
-      // ===== QR + FOOTER FINAL PAGE =====
-      ensureSpace(120)
-      try {
-        const qrUrl = `${window.location.origin}/?report=${result.id}`
-        const qrData = await QRCodeLib.toDataURL(qrUrl, { width: 200, margin: 1, color: { dark: '#0e74bf', light: '#ffffff' } })
-        doc.addImage(qrData, 'PNG', W - MARGIN - 90, y, 90, 90)
-        setColor(doc.setTextColor.bind(doc), P.muted); doc.setFont('helvetica','normal'); doc.setFontSize(8)
-        doc.text('Scan to verify report online', W - MARGIN - 90, y + 100)
-        // disclaimer intentionally omitted per user request
-      } catch (e) {}
 
       const pageCount = doc.internal.getNumberOfPages()
       for (let i = 1; i <= pageCount; i++) {
