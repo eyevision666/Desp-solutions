@@ -10,11 +10,12 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'aravind4906'
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'eyevision'
 const JWT_SECRET_ENCODED = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-only-not-secure')
 const isProd = process.env.NODE_ENV === 'production'
-const SUPABASE_URL = process.env.SUPABASE_URL || ''
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLIC_KEY
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim()
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLIC_KEY || '').trim()
 const SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY || ''
 const SUPABASE_TABLE = process.env.SUPABASE_ASSESSMENTS_TABLE || 'assessments'
+const SUPABASE_CONFIG_ERROR = 'Supabase is not configured. Add SUPABASE_URL and either SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY in your hosting environment.'
 
 let supabaseClient = null
 function getSupabase() {
@@ -165,7 +166,7 @@ async function route(request, method) {
         console.log('[api] Supabase not configured, using fallback')
         fallbackAssessments.push(doc)
       } else {
-        return json({ error: 'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before deployment.' }, 500)
+        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       }
 
       // Sync to Google Sheets (non-blocking best-effort)
@@ -180,7 +181,7 @@ async function route(request, method) {
     // POST /api/sync — manual sync all missing assessments to Google Sheets (admin only)
     if (segments[0] === 'sync' && method === 'POST') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
-      if (!db) return json({ error: 'Supabase not configured' }, 500)
+      if (!db) return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       const proto = request.headers.get('x-forwarded-proto') || 'https'
       const host = request.headers.get('host')
       const baseUrl = `${proto}://${host}`
@@ -200,7 +201,7 @@ async function route(request, method) {
           if (!doc) return json({ error: 'not found' }, 404)
           return json(doc)
         }
-        return json({ error: 'Supabase is not configured' }, 500)
+        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       }
       const { data, error } = await db.from(SUPABASE_TABLE).select('*').eq('id', segments[1]).single()
       if (error) {
@@ -216,7 +217,7 @@ async function route(request, method) {
         if (!isProd) {
           return json(fallbackAssessments.map(({ result, ...rest }) => ({ ...rest, result, eyeImages: undefined })))
         }
-        return json({ error: 'Supabase is not configured' }, 500)
+        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       }
       const { data, error } = await db.from(SUPABASE_TABLE)
         .select('id,createdat,patient,medicalhistory,symptoms,ocularhistory,screentime,devices,devicehours,usagetypes,result')
@@ -242,7 +243,7 @@ async function route(request, method) {
           const severity = Object.entries(levelMap).map(([level, count]) => ({ _id: Number(level), count })).sort((a, b) => a._id - b._id)
           return json({ total, todayCount, avgScore, severity })
         }
-        return json({ error: 'Supabase is not configured' }, 500)
+        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       }
       const { count: totalCount, error: totalError } = await db.from(SUPABASE_TABLE).select('id', { count: 'exact', head: true })
       if (totalError) throw new Error(totalError.message)
