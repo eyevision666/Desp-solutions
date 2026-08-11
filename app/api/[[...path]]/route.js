@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import { assessEyeStrain } from '@/lib/ai-logic'
 import { appendAssessment, syncAssessments } from '@/lib/sheets'
@@ -10,58 +9,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'aravind4906'
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'eyevision'
 const JWT_SECRET_ENCODED = new TextEncoder().encode(process.env.JWT_SECRET || 'dev-only-not-secure')
 const isProd = process.env.NODE_ENV === 'production'
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim()
-const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_PUBLIC_KEY || '').trim()
-const SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY || ''
-const SUPABASE_TABLE = process.env.SUPABASE_ASSESSMENTS_TABLE || 'assessments'
-const SUPABASE_CONFIG_ERROR = 'Supabase is not configured. Add SUPABASE_URL and either SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY in your hosting environment.'
 
-let supabaseClient = null
-function getSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return null
-  if (!supabaseClient) {
-    supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY)
-  }
-  return supabaseClient
-}
-
-const fallbackAssessments = []
-
-function mapAssessmentToDb(doc) {
-  return {
-    id: doc.id,
-    createdat: doc.createdAt,
-    patient: doc.patient,
-    medicalhistory: doc.medicalHistory,
-    symptoms: doc.symptoms,
-    ocularhistory: doc.ocularHistory,
-    screentime: doc.screenTime,
-    devices: doc.devices,
-    devicehours: doc.deviceHours,
-    usagetypes: doc.usageTypes,
-    eyeimages: doc.eyeImages,
-    result: doc.result,
-  }
-}
-
-function mapDbAssessment(row) {
-  if (!row) return null
-  return {
-    id: row.id,
-    createdAt: row.createdat,
-    patient: row.patient,
-    medicalHistory: row.medicalhistory || [],
-    symptoms: row.symptoms || [],
-    ocularHistory: row.ocularhistory || [],
-    screenTime: Number(row.screentime) || 0,
-    devices: row.devices || [],
-    deviceHours: row.devicehours || {},
-    usageTypes: row.usagetypes || [],
-    eyeImages: row.eyeimages || { left: null, right: null },
-    result: row.result || {},
-  }
-}
+const assessments = []
 
 function json(data, status = 200) {
   return NextResponse.json(data, {
@@ -129,8 +78,6 @@ async function route(request, method) {
       return json({ authenticated: true, username: session.username })
     }
 
-    const db = getSupabase()
-
     // POST /api/assessments  — submit survey, compute AI result, store
     if (segments[0] === 'assessments' && segments.length === 1 && method === 'POST') {
       console.log('[api] POST /assessments received')
@@ -152,22 +99,7 @@ async function route(request, method) {
         eyeImages: body.eyeImages || { left: null, right: null },
         result,
       }
-
-      if (db) {
-        console.log('[api] storing to Supabase')
-        const dbDoc = mapAssessmentToDb(doc)
-        const { error } = await db.from(SUPABASE_TABLE).insert([dbDoc])
-        if (error) {
-          console.error('[api] Supabase insert error', error)
-          if (!isProd) fallbackAssessments.push(doc)
-          return json({ error: error.message || 'Failed to save to Supabase' }, 500)
-        }
-      } else if (!isProd) {
-        console.log('[api] Supabase not configured, using fallback')
-        fallbackAssessments.push(doc)
-      } else {
-        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
-      }
+      assessments.push(doc)
 
       // Sync to Google Sheets (non-blocking best-effort)
       const proto = request.headers.get('x-forwarded-proto') || 'https'
@@ -175,95 +107,46 @@ async function route(request, method) {
       const baseUrl = `${proto}://${host}`
       appendAssessment(doc, baseUrl).catch((e) => console.error('sheets sync failed:', e.message))
 
-      return json({ id, ...doc })
+      return json(doc)
     }
 
     // POST /api/sync — manual sync all missing assessments to Google Sheets (admin only)
     if (segments[0] === 'sync' && method === 'POST') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
-      if (!db) return json({ error: SUPABASE_CONFIG_ERROR }, 500)
       const proto = request.headers.get('x-forwarded-proto') || 'https'
       const host = request.headers.get('host')
       const baseUrl = `${proto}://${host}`
-      const { data: docs, error } = await db.from(SUPABASE_TABLE).select('*').order('createdat', { ascending: true })
-      if (error) throw new Error(error.message)
-      const mappedDocs = (docs || []).map(mapDbAssessment)
-      const res = await syncAssessments(mappedDocs, baseUrl)
-      return json({ total: mappedDocs.length, ...res })
+      const res = await syncAssessments(assessments, baseUrl)
+      return json({ total: assessments.length, ...res })
     }
 
     // GET /api/assessments/:id — fetch single assessment
     if (segments[0] === 'assessments' && segments.length === 2 && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
-      if (!db) {
-        if (!isProd) {
-          const doc = fallbackAssessments.find((item) => item.id === segments[1])
-          if (!doc) return json({ error: 'not found' }, 404)
-          return json(doc)
-        }
-        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
-      }
-      const { data, error } = await db.from(SUPABASE_TABLE).select('*').eq('id', segments[1]).single()
-      if (error) {
-        return json({ error: error.message || 'not found' }, error.code === 'PGRST116' ? 404 : 500)
-      }
-      return json(mapDbAssessment(data))
+      const doc = assessments.find((item) => item.id === segments[1])
+      if (!doc) return json({ error: 'not found' }, 404)
+      return json(doc)
     }
 
     // GET /api/assessments — list recent assessments
     if (segments[0] === 'assessments' && segments.length === 1 && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
-      if (!db) {
-        if (!isProd) {
-          return json(fallbackAssessments.map(({ result, ...rest }) => ({ ...rest, result, eyeImages: undefined })))
-        }
-        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
-      }
-      const { data, error } = await db.from(SUPABASE_TABLE)
-        .select('id,createdat,patient,medicalhistory,symptoms,ocularhistory,screentime,devices,devicehours,usagetypes,result')
-        .order('createdat', { ascending: false })
-        .limit(200)
-      if (error) throw new Error(error.message)
-      return json((data || []).map(mapDbAssessment))
+      return json(assessments.map(({ result, ...rest }) => ({ ...rest, result, eyeImages: undefined })))
     }
 
     // GET /api/stats  — admin stats (admin only)
     if (segments[0] === 'stats' && method === 'GET') {
       if (!(await verifyAdminSession())) return json({ error: 'Unauthorized' }, 401)
-      if (!db) {
-        if (!isProd) {
-          const total = fallbackAssessments.length
-          const today = new Date(); today.setHours(0,0,0,0)
-          const todayCount = fallbackAssessments.filter((a) => new Date(a.createdAt) >= today).length
-          const avgScore = total ? Math.round(fallbackAssessments.reduce((sum, a) => sum + a.result.score, 0) / total) : 0
-          const levelMap = fallbackAssessments.reduce((acc, a) => {
-            acc[a.result.level] = (acc[a.result.level] || 0) + 1
-            return acc
-          }, {})
-          const severity = Object.entries(levelMap).map(([level, count]) => ({ _id: Number(level), count })).sort((a, b) => a._id - b._id)
-          return json({ total, todayCount, avgScore, severity })
-        }
-        return json({ error: SUPABASE_CONFIG_ERROR }, 500)
-      }
-      const { count: totalCount, error: totalError } = await db.from(SUPABASE_TABLE).select('id', { count: 'exact', head: true })
-      if (totalError) throw new Error(totalError.message)
+      const total = assessments.length
       const today = new Date(); today.setHours(0,0,0,0)
-      const isoToday = today.toISOString()
-      const { count: todayCount, error: todayError } = await db.from(SUPABASE_TABLE)
-        .select('id', { count: 'exact', head: true })
-        .gte('createdat', isoToday)
-      if (todayError) throw new Error(todayError.message)
-      const { data: allResults, error: resultError } = await db.from(SUPABASE_TABLE).select('result')
-      if (resultError) throw new Error(resultError.message)
-      const rows = allResults || []
-      const avgScore = rows.length ? Math.round(rows.reduce((sum, a) => sum + (a.result?.score || 0), 0) / rows.length) : 0
-      const levelMap = rows.reduce((acc, a) => {
-        const level = a.result?.level || 0
-        acc[level] = (acc[level] || 0) + 1
+      const todayCount = assessments.filter((a) => new Date(a.createdAt) >= today).length
+      const avgScore = total ? Math.round(assessments.reduce((sum, a) => sum + a.result.score, 0) / total) : 0
+      const levelMap = assessments.reduce((acc, a) => {
+        acc[a.result.level] = (acc[a.result.level] || 0) + 1
         return acc
       }, {})
       const severity = Object.entries(levelMap).map(([level, count]) => ({ _id: Number(level), count })).sort((a, b) => a._id - b._id)
-      return json({ total: totalCount ?? 0, todayCount: todayCount ?? 0, avgScore, severity })
+      return json({ total, todayCount, avgScore, severity })
     }
   } catch (error) {
     console.error('[api] route error', error)
